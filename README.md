@@ -44,7 +44,7 @@ Hope this can give you some insights.
 - Method: `PATCH`
 - Path : `/orders/:id`
 - Request body:
-```
+	```
     {
         "status": "TAKEN"
     }
@@ -52,20 +52,20 @@ Hope this can give you some insights.
 - Response:
     Header: `HTTP 200`
     Body:
-     ```
+    ```
       {
           "status": "SUCCESS"
       }
-      ```
+    ```
     or
 
     Header: `HTTP <HTTP_CODE>`
     Body:
-     ```
+    ```
       {
           "error": "ERROR_DESCRIPTION"
       }
-      ```
+    ```
 
 ### List order
 - Method: `GET`
@@ -73,7 +73,7 @@ Hope this can give you some insights.
 - Response:
     Header: `HTTP 200`
     Body:
-      ```
+    ```
       [
           {
               "id": <order_id>,
@@ -82,7 +82,7 @@ Hope this can give you some insights.
           },
           ...
       ]
-      ```
+    ```
 
     or
 
