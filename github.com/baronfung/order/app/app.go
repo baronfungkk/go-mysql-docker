@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"fmt"
 	"strconv"
+	"reflect"
 
 	"github.com/gorilla/mux"
 )
@@ -18,8 +19,8 @@ type App struct {
 }
 
 type PlaceOrderRequest struct { 
-	Origin [2]string `json:"origin"`
-	Destination [2]string `json:"destination"`
+	Origin []string `json:"origin"`
+	Destination []string `json:"destination"`
 }
 
 type PlaceOrderSuccess struct{
@@ -63,6 +64,13 @@ type Duration struct{
 }
 
 var APIKey = "AIzaSyDYhbZ-I_IJg5M7lLjH5IqjfDe3GoMsZSo"
+var errorMessage = map[string]string{
+    "PageNumberExceeds": "Page number exceeds total number of pages.",
+	"PageNotInt":"page is not a valid integer.",
+	"LimitNotInt":"limit is not a valid integer.",
+	"WrongRequestFormat":"The format of the request body is wrong.",
+	"WrongStatus":"Status in request body is not in the correct value.",
+}
 
 func (app *App) SetupRouter() {
 	app.Router.
@@ -128,7 +136,6 @@ func (app *App) postFunction(w http.ResponseWriter, r *http.Request) {
 func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 	
 	order := PlaceOrderRequest{} //initialize
-	error := Error{"Wrong request body input format."}
 
 	if r.Method == "POST" {
 		/*bytesBody, err := ioutil.ReadAll(r.Body)
@@ -139,83 +146,147 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(bytesBody,&order)*/
 		
 		err := json.NewDecoder(r.Body).Decode(&order)
+		
 		if err != nil{
-			//panic(err)
+			error := Error{errorMessage["WrongRequestFormat"]}
 			errorJson,err := json.Marshal(&error)
 			if err!= nil{
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
 			w.Header().Set("Content-Type","application/json")
-			w.Write(errorJson)						
+			w.Write(errorJson)
+			return
 		}
 		
+		//log.Println("Request info: ")
+		//log.Println(order)
+		//log.Println(order.Origin)
+		//log.Println(len(order.Origin))
+		//log.Println(order.Destination)
+		//log.Println(len(order.Destination))
+					
 		
 		//call google map API to get distaince
-		var originLat = order.Origin[0]
-		var originLong = order.Origin[1]
-		var destLat = order.Destination[0]
-		var destLong = order.Destination[1]
+		if len(order.Origin)==2 && len(order.Destination)==2 {
 		
-		
-		//TODO origin,dest range validation
-		//latitude must be between -90.0 to 90.0, longitude -180 to 180
-				
-		//fmt.Println("originLat:"+ originLat)
-		//fmt.Println("originLong:"+ originLong)
-		//fmt.Println("destLat:"+ destLat)
-		//fmt.Println("destLong:"+ destLong)
-		
+			var originLat = order.Origin[0]
+			var originLong = order.Origin[1]
+			var destLat = order.Destination[0]
+			var destLong = order.Destination[1]
 			
-		response, err := http.Get("https://maps.googleapis.com/maps/api/distancematrix/json?origins="+originLat+","+originLong+"&destinations="+ destLat+ ","+ destLong+"&key="+ APIKey)
-		if err != nil {
-			fmt.Printf("The HTTP request failed with error %s\n", err)
-		} else {
-			data, _ := ioutil.ReadAll(response.Body)
-			fmt.Println("Called google map API!")
-			//fmt.Println(string(data))
-			
-			//get distance
-			var rs Result
-			json.Unmarshal([]byte(data),&rs)
-			fmt.Println("rs")
-			fmt.Println(rs)		
-			fmt.Println(rs.Rows[0].Elements[0].Distance.Value)
+			log.Println("originLat")
+			log.Println(reflect.TypeOf(originLat))
+			log.Println(len(originLat))
 						
-			d := strconv.Itoa(rs.Rows[0].Elements[0].Distance.Value)
 			
-			//insert into db
-			_, err := app.Database.Exec("INSERT INTO `Orders` VALUES (NULL,"+originLat+","+originLong+","+destLat+","+destLong+","+d+",'UNASSIGNED',NULL)")
+			//TODO origin,dest range validation
+			//latitude must be between -90.0 to 90.0, longitude -180 to 180
+			originLatFloat, err := strconv.ParseFloat(originLat, 64)
+			originLongFloat, err := strconv.ParseFloat(originLong, 64)
+			destLatFloat, err := strconv.ParseFloat(destLat, 64)
+			destLongFloat, err := strconv.ParseFloat(destLong, 64)
 			
-			if err != nil {
-				log.Println("Error:")
-				log.Println(err)
-				log.Fatal("Database INSERT failed")
-				//TODO database insert fail error
+			fmt.Println("originLatFloat:")
+			fmt.Println(originLatFloat)
+			
+			if originLatFloat < -90.0 || originLatFloat>90.0{
+				error := Error{"origin latitude is not in the valid range."}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
 			}
-			
-			//get largest id
-			
-			var maxId int
-			app.Database.QueryRow("SELECT MAX(ORDER_ID) FROM `Orders`").Scan(&maxId)
-			/*if err != nil {
-				log.Fatal("Database SELECT max id failed.")
-			}*/
-			
-			//TODO database select fail?
-	
-			//write success response body
-			success := PlaceOrderSuccess{Id:maxId,Distance:d,Status:"UNASSIGNED"}
-			successJson,err := json.Marshal(&success)
-			if err!= nil{
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+			if originLongFloat < -180.0 || originLongFloat>180.0{
+				error := Error{"origin longitude is not in the valid range."}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
 			}
-			w.Header().Set("Content-Type","application/json")
-			w.Write(successJson)		
+			if destLatFloat < -90.0 || destLatFloat>90.0{
+				error := Error{"destination latitude is not in the valid range."}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
+			}
+			if destLongFloat < -180.0 || destLongFloat>180.0{
+				error := Error{"destination longitude is not in the valid range."}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
+			}
 
-		}
+					
+			fmt.Println("originLat:"+ originLat)
+			fmt.Println("originLong:"+ originLong)
+			fmt.Println("destLat:"+ destLat)
+			fmt.Println("destLong:"+ destLong)
+			
+				
+			response, err := http.Get("https://maps.googleapis.com/maps/api/distancematrix/json?origins="+originLat+","+originLong+"&destinations="+ destLat+ ","+ destLong+"&key="+ APIKey)
+			if err != nil {
+				fmt.Printf("The HTTP request failed with error %s\n", err)
+			} else {
+				data, _ := ioutil.ReadAll(response.Body)
+				fmt.Println("Called google map API!")
+				//fmt.Println(string(data))
+				
+				//get distance
+				var rs Result
+				json.Unmarshal([]byte(data),&rs)
+				fmt.Println("rs")
+				fmt.Println(rs)		
+				fmt.Println(rs.Rows[0].Elements[0].Distance.Value)
+							
+				d := strconv.Itoa(rs.Rows[0].Elements[0].Distance.Value)
+				
+				//insert into db
+				_, err := app.Database.Exec("INSERT INTO `Orders` VALUES (NULL,"+originLat+","+originLong+","+destLat+","+destLong+","+d+",'UNASSIGNED',NULL)")
+				
+				if err != nil {
+					log.Println("Error:")
+					log.Println(err)
+					log.Println("Database INSERT failed")
+					//TODO database insert fail error
+				}
+				
+				//get largest id
+				
+				var maxId int
+				app.Database.QueryRow("SELECT MAX(ORDER_ID) FROM `Orders`").Scan(&maxId)
+				/*if err != nil {
+					log.Fatal("Database SELECT max id failed.")
+				}*/
+				
+				//TODO database select fail?
+		
+				//write success response body
+				success := PlaceOrderSuccess{Id:maxId,Distance:d,Status:"UNASSIGNED"}
+				successJson,err := json.Marshal(&success)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(successJson)		
+
+				}
+			}
 
 		log.Println("POST DONE")
-		log.Println(order)
 		
 		
 		//fmt.Fprint(w, d)
@@ -239,8 +310,8 @@ func (app *App) takeOrder(w http.ResponseWriter, r *http.Request){
 	}
 	
 	takeorder := TakeOrder{} //initialize
-	error := Error{"Wrong request body input format."}
-	errorWrongStatus := Error{"Status in request body is not in the correct value."}
+	error := Error{errorMessage["WrongRequestFormat"]}
+	errorWrongStatus := Error{errorMessage["WrongStatus"]}
 
 	if r.Method == "PATCH" {
 		
@@ -252,7 +323,8 @@ func (app *App) takeOrder(w http.ResponseWriter, r *http.Request){
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
 			w.Header().Set("Content-Type","application/json")
-			w.Write(errorJson)						
+			w.Write(errorJson)	
+			return
 		}
 		
 		
@@ -326,12 +398,28 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 	//parse page, limit to int
 	page, err := strconv.Atoi(pageStr)
 	if err != nil {
-		log.Fatal(err)
+		error := Error{errorMessage["PageNotInt"]}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+			
+		return
 	}
 	
 	limit, err2 := strconv.Atoi(limitStr)
 	if err2 != nil {
-		log.Fatal(err)
+		error := Error{errorMessage["LimitNotInt"]}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+			
+		return
 	}
 	
 	
@@ -386,18 +474,32 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 	log.Println("Total no. of pages: "+strconv.Itoa(len(ordersAll)))
 	
 	if page> len(ordersAll){
-		error := Error{"Wrong request body input format."}
+		error := Error{errorMessage["PageNumberExceeds"]}
 		errorJson,err := json.Marshal(&error)
 		if err!= nil{
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 		}
 		w.Header().Set("Content-Type","application/json")
-		w.Write(errorJson)		
+		w.Write(errorJson)
+			
+		return
 	}
 	
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(ordersAll[(page-1)]); err != nil {
 		panic(err)
 	}
+	/*
+	if(w.StatusCode==405){
+		error := Error{"Either one of the parameters or both of the parameters are missed."}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+			
+		return
+	}*/
 	
 }
