@@ -8,7 +8,6 @@ import (
 	"io/ioutil"
 	"fmt"
 	"strconv"
-	"reflect"
 
 	"github.com/gorilla/mux"
 )
@@ -70,6 +69,12 @@ var errorMessage = map[string]string{
 	"LimitNotInt":"limit is not a valid integer.",
 	"WrongRequestFormat":"The format of the request body is wrong.",
 	"WrongStatus":"Status in request body is not in the correct value.",
+	"ZeroResults":"Route not found. Order will not be placed.",
+	"DbSelect":"Database SELECT failed.",
+	"DbInsert":"Database INSERT failed.",
+	"DbUpdate":"Database UPDATE failed.",
+	"OrderTaken":"The order was taken by the others.",
+	"OrderNotFound":"The order id is not found.",
 }
 
 func (app *App) SetupRouter() {
@@ -111,13 +116,23 @@ func (app *App) getFunction(w http.ResponseWriter, r *http.Request) {
 	dbdata := &DbData{}
 	err := app.Database.QueryRow("SELECT ORDER_ID, TOTAL_DISTANCE, STATUS FROM `Orders` WHERE ORDER_ID = ?", id).Scan(&dbdata.ID, &dbdata.Distance, &dbdata.Status)
 	if err != nil {
-		log.Fatal("Database SELECT failed")
+		log.Println(errorMessage["DbSelect"])
+		error := Error{errorMessage["DbSelect"]}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+		return
+		
 	}
 
 	log.Println("You fetched a thing! 1")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(dbdata); err != nil {
-		panic(err)
+		//panic(err)
+		log.Println(err)
 	}
 }
 
@@ -126,7 +141,16 @@ func (app *App) postFunction(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Error:")
 		log.Println(err)
-		log.Fatal("Database INSERT failed")
+		log.Println(errorMessage["DbInsert"])
+		
+		error := Error{errorMessage["DbInsert"]}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+		return
 	}
 
 	log.Println("You called a thing!")
@@ -174,20 +198,14 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 			var destLat = order.Destination[0]
 			var destLong = order.Destination[1]
 			
-			log.Println("originLat")
-			log.Println(reflect.TypeOf(originLat))
-			log.Println(len(originLat))
-						
-			
-			//TODO origin,dest range validation
 			//latitude must be between -90.0 to 90.0, longitude -180 to 180
 			originLatFloat, err := strconv.ParseFloat(originLat, 64)
 			originLongFloat, err := strconv.ParseFloat(originLong, 64)
 			destLatFloat, err := strconv.ParseFloat(destLat, 64)
 			destLongFloat, err := strconv.ParseFloat(destLong, 64)
 			
-			fmt.Println("originLatFloat:")
-			fmt.Println(originLatFloat)
+			//fmt.Println("originLatFloat:")
+			//fmt.Println(originLatFloat)
 			
 			if originLatFloat < -90.0 || originLatFloat>90.0{
 				error := Error{"origin latitude is not in the valid range."}
@@ -240,6 +258,14 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 			response, err := http.Get("https://maps.googleapis.com/maps/api/distancematrix/json?origins="+originLat+","+originLong+"&destinations="+ destLat+ ","+ destLong+"&key="+ APIKey)
 			if err != nil {
 				fmt.Printf("The HTTP request failed with error %s\n", err)
+				error := Error{"The HTTP request failed with error."}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
 			} else {
 				data, _ := ioutil.ReadAll(response.Body)
 				fmt.Println("Called google map API!")
@@ -253,41 +279,73 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 				fmt.Println(rs.Rows[0].Elements[0].Distance.Value)
 							
 				d := strconv.Itoa(rs.Rows[0].Elements[0].Distance.Value)
+				status := rs.Rows[0].Elements[0].Status
+				fmt.Println("Status: "+status)
 				
-				//insert into db
-				_, err := app.Database.Exec("INSERT INTO `Orders` VALUES (NULL,"+originLat+","+originLong+","+destLat+","+destLong+","+d+",'UNASSIGNED',NULL)")
-				
-				if err != nil {
-					log.Println("Error:")
-					log.Println(err)
-					log.Println("Database INSERT failed")
-					//TODO database insert fail error
+				if status == "ZERO_RESULTS"{
+					error := Error{errorMessage["ZeroResults"]}
+					errorJson,err := json.Marshal(&error)
+					if err!= nil{
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					w.Header().Set("Content-Type","application/json")
+					w.Write(errorJson)
+					return
+					
 				}
 				
-				//get largest id
-				
-				var maxId int
-				app.Database.QueryRow("SELECT MAX(ORDER_ID) FROM `Orders`").Scan(&maxId)
-				/*if err != nil {
-					log.Fatal("Database SELECT max id failed.")
-				}*/
-				
-				//TODO database select fail?
-		
-				//write success response body
-				success := PlaceOrderSuccess{Id:maxId,Distance:d,Status:"UNASSIGNED"}
-				successJson,err := json.Marshal(&success)
-				if err!= nil{
-					http.Error(w, err.Error(), http.StatusInternalServerError)
+				if status == "OK"{
+					//insert into db
+					_, err := app.Database.Exec("INSERT INTO `Orders` VALUES (NULL,"+originLat+","+originLong+","+destLat+","+destLong+","+d+",'UNASSIGNED',NULL)")
+					
+					if err != nil {
+						log.Println("Error:")
+						log.Println(err)
+						log.Println(errorMessage["DbInsert"])
+						
+						error := Error{errorMessage["DbInsert"]}
+						errorJson,err := json.Marshal(&error)
+						if err!= nil{
+							http.Error(w, err.Error(), http.StatusInternalServerError)
+						}
+						w.Header().Set("Content-Type","application/json")
+						w.Write(errorJson)
+						return
+					}
+					
+					//get largest id
+					
+					var maxId int
+					err2 := app.Database.QueryRow("SELECT MAX(ORDER_ID) FROM `Orders`").Scan(&maxId)
+					if err2 != nil {
+						error := Error{"Maximum ID is not found in the database."}
+						errorJson,err := json.Marshal(&error)
+						if err!= nil{
+							http.Error(w, err.Error(), http.StatusInternalServerError)
+						}
+						w.Header().Set("Content-Type","application/json")
+						w.Write(errorJson)
+						return
+					}
+					
+			
+					//write success response body
+					success := PlaceOrderSuccess{Id:maxId,Distance:d,Status:"UNASSIGNED"}
+					successJson,err := json.Marshal(&success)
+					if err!= nil{
+						http.Error(w, err.Error(), http.StatusInternalServerError)
+					}
+					w.Header().Set("Content-Type","application/json")
+					w.Write(successJson)	
 				}
-				w.Header().Set("Content-Type","application/json")
-				w.Write(successJson)		
+					
 
-				}
+				
 			}
 
 		log.Println("POST DONE")
 		
+		}
 		
 		//fmt.Fprint(w, d)
 	} else {
@@ -327,32 +385,80 @@ func (app *App) takeOrder(w http.ResponseWriter, r *http.Request){
 			return
 		}
 		
-		
-		//call google map API to get distaince
+		//check if id exist in database
+		rows, err :=app.Database.Query("SELECT ORDER_ID, TOTAL_DISTANCE, STATUS FROM `Orders` WHERE ORDER_ID="+id)
+		var count int
+		for rows.Next(){
+			count++
+		}
+		log.Println("Rows selected select ID:")
+		log.Println(count)
+		if count == 0 {
+			log.Println(errorMessage["OrderNotFound"])
+			error := Error{errorMessage["OrderNotFound"]}
+			errorJson,err := json.Marshal(&error)
+			if err!= nil{
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			w.Header().Set("Content-Type","application/json")
+			w.Write(errorJson)
+			return
+		}
+	
 		var takeorder = takeorder.Status
 		
 		if takeorder== "TAKEN"{
 			//update status to "TAKEN"
-			//TODO CHANGE PARAM TO ?
-			_, err := app.Database.Exec("UPDATE `Orders` SET STATUS='TAKEN' WHERE ORDER_ID="+id+ " AND `STATUS` ='UNASSIGNED'")
+			
+			res, err := app.Database.Exec("UPDATE `Orders` SET STATUS='TAKEN' WHERE ORDER_ID="+id+ " AND `STATUS` ='UNASSIGNED'")
 			
 			if err != nil {
 				log.Println("Error:")
 				log.Println(err)
-				log.Fatal("Database UPDATE failed")
-				//TODO database update fail error
+				//log.Fatal("Database UPDATE failed")
+				log.Println(errorMessage["DbUpdate"])
+				error := Error{errorMessage["DbUpdate"]}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
+				
 				
 				//TODO id not exist
 			}
-			
+			rowCnt,err := res.RowsAffected()
+			log.Println("Rows affected:")
+			log.Println(rowCnt)
+			if rowCnt ==0{
+				log.Println(errorMessage["OrderTaken"])
+				error := Error{errorMessage["OrderTaken"]}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
+				
+			}
 			//update status to "SUCCESS"
 			_,err2 := app.Database.Exec("UPDATE `Orders` SET STATUS='SUCCESS' WHERE ORDER_ID="+id+ " AND `STATUS` ='TAKEN'")
 			
 			if err2 != nil {
 				log.Println("Error:")
 				log.Println(err)
-				log.Fatal("Database UPDATE failed")
-				//TODO database update fail error
+				log.Println(errorMessage["DbUpdate"])
+				error := Error{errorMessage["DbUpdate"]}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return
 			}
 			
 			//write success response body
@@ -431,7 +537,15 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 	//err := app.Database.QueryRow("SELECT ORDER_ID, TOTAL_DISTANCE, STATUS FROM `Orders`").Scan(&dbresult.Id, &dbresult.Distance, &dbresult.Status)
 	
 	if err != nil {
-		log.Fatal("Database SELECT failed")
+		log.Println(errorMessage["DbSelect"])
+		error := Error{errorMessage["DbSelect"]}
+		errorJson,err := json.Marshal(&error)
+		if err!= nil{
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		w.Header().Set("Content-Type","application/json")
+		w.Write(errorJson)
+		return
 	}
 	defer rows.Close()
 	
@@ -439,20 +553,27 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 		order := new(PlaceOrderSuccess)
 		err:= rows.Scan(&order.Id, &order.Distance, &order.Status)
 		if err != nil {
-			log.Fatal("Database SELECT failed")
+			log.Println(errorMessage["DbSelect"])
+			error := Error{errorMessage["DbSelect"]}
+			errorJson,err := json.Marshal(&error)
+			if err!= nil{
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			w.Header().Set("Content-Type","application/json")
+			w.Write(errorJson)
+			return
 		}
 		
 		orders = append(orders,order)
 		
 	}
 	if err := rows.Err(); err != nil {
-		panic(err)
+		//panic(err)
+		log.Println(err)
 	}
 	//assign orders to diffeerent pages
 	//use an array to stores different pages or records
 	
-	//var totalNoOfPage = 0.0;
-	//totalNoOfPage = math.Round(len(orders)/limit)
 	var ordersAll [][]*PlaceOrderSuccess
 	
 	for i := 0; i< len(orders); i+= limit{
@@ -487,7 +608,7 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 	
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(ordersAll[(page-1)]); err != nil {
-		panic(err)
+		log.Println(err)
 	}
 	/*
 	if(w.StatusCode==405){
