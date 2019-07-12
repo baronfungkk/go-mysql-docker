@@ -96,7 +96,6 @@ Hope this can give you some insights.
 
 
 ## Required Packages
-//TO BE AMENDED*********************
 - Database
     * [MySql](https://github.com/go-sql-driver/mysql)
 - Routing
@@ -110,7 +109,7 @@ git clone https://github.com/baronfungkk/go-mysql-docker
 
 cd go-mysql-crud/github.com/baronfung/order
 
-chmod +x run.sh
+chmod +x start.sh
 ./run.sh
 
 docker-compose build

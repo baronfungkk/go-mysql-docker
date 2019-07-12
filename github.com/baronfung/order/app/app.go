@@ -62,7 +62,7 @@ type Duration struct{
 	Value int `json:"value"`
 }
 
-var APIKey = "AIzaSyDYhbZ-I_IJg5M7lLjH5IqjfDe3GoMsZSo"
+var APIKey = "<Your Google Map API Key>"
 var errorMessage = map[string]string{
     "PageNumberExceeds": "Page number exceeds total number of pages.",
 	"PageNotInt":"page is not a valid integer.",
