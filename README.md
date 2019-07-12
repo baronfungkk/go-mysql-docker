@@ -110,10 +110,8 @@ git clone https://github.com/baronfungkk/go-mysql-docker
 cd go-mysql-crud/github.com/baronfung/order
 
 chmod +x start.sh
-./run.sh
+./start.sh
 
-docker-compose build
-docker-compose up
 ```
 
 ## Google Map API key

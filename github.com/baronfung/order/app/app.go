@@ -63,6 +63,7 @@ type Duration struct{
 }
 
 var APIKey = "<Your Google Map API Key>"
+
 var errorMessage = map[string]string{
     "PageNumberExceeds": "Page number exceeds total number of pages.",
 	"PageNotInt":"page is not a valid integer.",
@@ -75,6 +76,7 @@ var errorMessage = map[string]string{
 	"DbUpdate":"Database UPDATE failed.",
 	"OrderTaken":"The order was taken by the others.",
 	"OrderNotFound":"The order id is not found.",
+	"APIKey":"Please configure the Google Map API Key in app.go var APIKey.",
 }
 
 func (app *App) SetupRouter() {
@@ -182,6 +184,18 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
+		if len(order.Origin)!=2 || len(order.Destination)!=2{
+			error := Error{errorMessage["WrongRequestFormat"]}
+			errorJson,err := json.Marshal(&error)
+			if err!= nil{
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			w.Header().Set("Content-Type","application/json")
+			w.Write(errorJson)
+			return			
+			
+		}
+		
 		//log.Println("Request info: ")
 		//log.Println(order)
 		//log.Println(order.Origin)
@@ -254,7 +268,19 @@ func (app *App) placeOrder(w http.ResponseWriter, r *http.Request) {
 			fmt.Println("destLat:"+ destLat)
 			fmt.Println("destLong:"+ destLong)
 			
+			//check if API key is configured
+			if APIKey=="<Your Google Map API Key>"{
+				error := Error{errorMessage["APIKey"]}
+				errorJson,err := json.Marshal(&error)
+				if err!= nil{
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				w.Header().Set("Content-Type","application/json")
+				w.Write(errorJson)
+				return				
 				
+			}
+						
 			response, err := http.Get("https://maps.googleapis.com/maps/api/distancematrix/json?origins="+originLat+","+originLong+"&destinations="+ destLat+ ","+ destLong+"&key="+ APIKey)
 			if err != nil {
 				fmt.Printf("The HTTP request failed with error %s\n", err)
@@ -610,17 +636,5 @@ func (app *App) listOrder(w http.ResponseWriter, r *http.Request){
 	if err := json.NewEncoder(w).Encode(ordersAll[(page-1)]); err != nil {
 		log.Println(err)
 	}
-	/*
-	if(w.StatusCode==405){
-		error := Error{"Either one of the parameters or both of the parameters are missed."}
-		errorJson,err := json.Marshal(&error)
-		if err!= nil{
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		w.Header().Set("Content-Type","application/json")
-		w.Write(errorJson)
-			
-		return
-	}*/
 	
 }
